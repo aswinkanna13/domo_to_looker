@@ -77,7 +77,6 @@ if st.session_state.datasets:
     st.subheader("📂 Available Datasets")
     st.dataframe(df_datasets, use_container_width=True)
 
-
 # ------------------- DASHBOARDS FETCH -------------------
 def fetch_pages():
     """Fetch all dashboards (pages)"""
@@ -105,35 +104,49 @@ if st.button("Fetch Dashboards"):
         st.warning("⚠️ Please provide both instance and developer token.")
     else:
         st.session_state.pages = fetch_pages()
+
         if st.session_state.pages:
-            st.success(f"✅ Retrieved {len(st.session_state.pages)} dashboards")
+            # Fetch card counts for each dashboard
+            dashboards_data = []
+            for p in st.session_state.pages:
+                if isinstance(p, dict):
+                    page_id = p.get("id")
+                    cards = fetch_cards(page_id)
+                    card_count = len(cards) if isinstance(cards, list) else 0
+                    dashboards_data.append({
+                        "Page ID": page_id,
+                        "Title": p.get("title"),
+                        "Owner": (p.get("owners", [{}])[0].get("displayName")
+                                  if p.get("owners") else "N/A"),
+                        "Number of Cards": card_count
+                    })
 
-# Display dashboards if fetched
-if st.session_state.pages:
-    df_pages = pd.DataFrame([
-        {
-            "Page ID": p.get("id"),
-            "Title": p.get("title"),
-            "Owner": (p.get("owners", [{}])[0].get("displayName")
-                      if p.get("owners") else "N/A")
-        }
-        for p in st.session_state.pages if isinstance(p, dict)
-    ])
-    st.subheader("📊 Available Dashboards")
-    st.dataframe(df_pages, use_container_width=True)
+            df_pages = pd.DataFrame(dashboards_data)
 
-    # Dropdown to select dashboard
-    page_map = {p["title"]: p["id"] for p in st.session_state.pages if isinstance(p, dict)}
-    selected_title = st.selectbox("Select Dashboard:", list(page_map.keys()))
-    st.session_state.selected_page_id = page_map[selected_title]
+            # Calculate summary
+            num_dashboards = len(df_pages)
+            avg_cards = df_pages["Number of Cards"].mean() if num_dashboards > 0 else 0
 
-    # Fetch and display cards for selected dashboard
-    if st.session_state.selected_page_id:
-        cards = fetch_cards(st.session_state.selected_page_id)
-        if cards and isinstance(cards, list):
-            df_cards = pd.DataFrame([
-                {"Card ID": c.get("id"), "Title": c.get("title")}
-                for c in cards if isinstance(c, dict)
-            ])
-            st.subheader(f"🗂️ Cards in Dashboard: {selected_title} (ID: {st.session_state.selected_page_id})")
-            st.dataframe(df_cards, use_container_width=True)
+            st.success(f"✅ Retrieved {num_dashboards} dashboards")
+
+            st.subheader("📊 Available Dashboards with Card Counts")
+            st.dataframe(df_pages, use_container_width=True)
+
+            # Display average
+            st.write(f"**📌 Average number of cards per dashboard:** {avg_cards:.2f}")
+
+            # Dropdown to select dashboard
+            page_map = {row["Title"]: row["Page ID"] for _, row in df_pages.iterrows()}
+            selected_title = st.selectbox("Select Dashboard:", list(page_map.keys()))
+            st.session_state.selected_page_id = page_map[selected_title]
+
+            # Fetch and display cards for selected dashboard
+            if st.session_state.selected_page_id:
+                cards = fetch_cards(st.session_state.selected_page_id)
+                if cards and isinstance(cards, list):
+                    df_cards = pd.DataFrame([
+                        {"Card ID": c.get("id"), "Title": c.get("title")}
+                        for c in cards if isinstance(c, dict)
+                    ])
+                    st.subheader(f"🗂️ Cards in Dashboard: {selected_title} (ID: {st.session_state.selected_page_id})")
+                    st.dataframe(df_cards, use_container_width=True)
