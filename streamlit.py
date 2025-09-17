@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 import os
 
-st.title("📊 Domo Dashboards, Cards & Datasets Viewer")
+st.title("📊 Domo Dashboards, Cards, Datasets & Dataflows Viewer")
 
 # Session state initialization
 if 'instance' not in st.session_state:
@@ -16,6 +16,8 @@ if 'selected_page_id' not in st.session_state:
     st.session_state.selected_page_id = None
 if 'datasets' not in st.session_state:
     st.session_state.datasets = []
+if 'dataflows' not in st.session_state:
+    st.session_state.dataflows = []
 
 # Inputs
 st.session_state.instance = st.text_input(
@@ -31,29 +33,22 @@ st.session_state.developer_token = st.text_input(
 def get_headers():
     return {
         "X-DOMO-Developer-Token": st.session_state.developer_token,
+        "Accept": "application/json",
         "Content-Type": "application/json"
     }
 
 # ------------------- DATASETS FETCH -------------------
 def fetch_datasets():
     """Fetch all datasets for the given instance"""
-    url = f"https://{st.session_state.instance}.domo.com/api/data/v3/datasources"
-    resp = requests.get(url, headers=get_headers())
-
-    if resp.status_code != 200:
-        st.error(f"❌ Failed to fetch datasets: {resp.status_code} {resp.text}")
+    url = f"https://{st.session_state.instance}.domo.com/api/data/v3/datasources/"
+    try:
+        resp = requests.get(url, headers=get_headers())
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("dataSources", [])
+    except requests.exceptions.RequestException as e:
+        st.error(f"❌ Failed to fetch datasets: {e}")
         return []
-
-    data = resp.json()
-
-    # Your response has "dataSources" key
-    if isinstance(data, dict) and "dataSources" in data:
-        return data["dataSources"]
-
-    # Fallback
-    st.warning("⚠️ Unexpected dataset response format")
-    st.json(data)
-    return []
 
 # Button to fetch datasets
 if st.button("Fetch Datasets"):
@@ -106,7 +101,6 @@ if st.button("Fetch Dashboards"):
         st.session_state.pages = fetch_pages()
 
         if st.session_state.pages:
-            # Fetch card counts for each dashboard
             dashboards_data = []
             for p in st.session_state.pages:
                 if isinstance(p, dict):
@@ -123,7 +117,6 @@ if st.button("Fetch Dashboards"):
 
             df_pages = pd.DataFrame(dashboards_data)
 
-            # Calculate summary
             num_dashboards = len(df_pages)
             avg_cards = df_pages["Number of Cards"].mean() if num_dashboards > 0 else 0
 
@@ -132,15 +125,12 @@ if st.button("Fetch Dashboards"):
             st.subheader("📊 Available Dashboards with Card Counts")
             st.dataframe(df_pages, use_container_width=True)
 
-            # Display average
             st.write(f"**📌 Average number of cards per dashboard:** {avg_cards:.2f}")
 
-            # Dropdown to select dashboard
             page_map = {row["Title"]: row["Page ID"] for _, row in df_pages.iterrows()}
             selected_title = st.selectbox("Select Dashboard:", list(page_map.keys()))
             st.session_state.selected_page_id = page_map[selected_title]
 
-            # Fetch and display cards for selected dashboard
             if st.session_state.selected_page_id:
                 cards = fetch_cards(st.session_state.selected_page_id)
                 if cards and isinstance(cards, list):
@@ -150,3 +140,40 @@ if st.button("Fetch Dashboards"):
                     ])
                     st.subheader(f"🗂️ Cards in Dashboard: {selected_title} (ID: {st.session_state.selected_page_id})")
                     st.dataframe(df_cards, use_container_width=True)
+
+# ------------------- DATAFLOWS (Magic ETL) -------------------
+def fetch_dataflows():
+    url = f"https://{st.session_state.instance}.domo.com/api/dataprocessing/v1/dataflows/"
+    try:
+        resp = requests.get(url, headers=get_headers())
+        resp.raise_for_status()
+        response = resp.json()
+        return response if isinstance(response, list) else []
+    except requests.exceptions.RequestException as e:
+        st.error(f"❌ Failed to fetch Magic ETL: {e}")
+        return []
+
+# Button to fetch dataflows
+if st.button("Fetch Dataflows"):
+    if not st.session_state.instance or not st.session_state.developer_token:
+        st.warning("⚠️ Please provide both instance and developer token.")
+    else:
+        st.session_state.dataflows = fetch_dataflows()
+        if st.session_state.dataflows:
+            st.success(f"✅ Retrieved {len(st.session_state.dataflows)} Magic ETLs")
+
+# Display dataflows if fetched
+if st.session_state.dataflows:
+    df_dataflows = pd.DataFrame([
+        {
+            "Dataflow ID": df.get("id", "N/A"),
+            "Name": df.get("name", "N/A"),
+            "no_of_inputs": len(df.get("inputs", [])),
+            "no_of_outputs": len(df.get("outputs", [])),
+            "inputs": [inp.get("dataSourceId") for inp in df.get("inputs", [])],
+            "outputs": [out.get("dataSourceId") for out in df.get("outputs", [])]
+        }
+        for df in st.session_state.dataflows if isinstance(df, dict)
+    ])
+    st.subheader("🛠️ Available Magic ETLs")
+    st.dataframe(df_dataflows, use_container_width=True)
